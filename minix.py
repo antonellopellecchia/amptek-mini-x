@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pyftdi.ftdi import Ftdi, UsbTools
 from functools import wraps
+import atexit
 
 
 Ftdi.add_custom_product(Ftdi.DEFAULT_VENDOR, 0xD058)
@@ -102,6 +103,10 @@ class ValueOutOfRange(Exception):
 
 
 class PowerNotSafe(Exception):
+    pass
+
+
+class InterlockError(Exception):
     pass
 
 
@@ -263,11 +268,14 @@ class MiniX:
             raise ValueOutOfRange("Current is out of range!")
         if not self.__is_safe_power(self._voltage, self._current):
             raise PowerNotSafe("Too much power, lower voltage or current!")
+        if not self.interlock_state or not self.monitor_ready:
+            raise InterlockError("Interlock is open")
         r = Request(self._register_state).set_low(
             MiniX.CTRL_HV_EN_A, MiniX.CTRL_HV_EN_B
         )
         self._ftdi.write_data(r.get_command())
         self._is_hv_on = True
+        atexit.register(self.power_off)
 
     @check_connected
     def power_off(self):
@@ -276,6 +284,7 @@ class MiniX:
         )
         self._ftdi.write_data(r.get_command())
         self._is_hv_on = False
+        atexit.unregister(self.power_off)
 
     @property
     @check_connected
