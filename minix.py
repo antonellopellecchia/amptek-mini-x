@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-from pyftdi.ftdi import Ftdi, UsbTools
+from pyftdi.ftdi import Ftdi, UsbTools, FtdiError
+from usb.core import USBError
 from functools import wraps
 import atexit
 
@@ -79,7 +80,11 @@ def check_connected(func):
     def wrap(self, *args, **kwargs):
         if not self._ftdi or not self._ftdi.is_mpsse:
             raise NotConnected()
-        return func(self, *args, **kwargs)
+        try:
+            return func(self, *args, **kwargs)
+        except FtdiError:
+            self._ftdi.close()
+            raise NotConnected()
 
     return wrap
 
@@ -198,22 +203,26 @@ class MiniX:
         self._ftdi.write_data(r.get_command())
 
     def __connect(self, serial_number=None):
-        self._ftdi = Ftdi()
+        try:
+            self._ftdi = Ftdi()
 
-        if serial_number is None:
-            devices = MiniX.find_devices()
-            if len(devices) == 0:
-                raise IOError("No devices found!")
-            serial_number = devices[0]["serial_number"]
+            if serial_number is None:
+                devices = MiniX.find_devices()
+                if len(devices) == 0:
+                    raise IOError("No devices found!")
+                serial_number = devices[0]["serial_number"]
 
-        self._ftdi.open_mpsse(
-            vendor=MiniX.VID,
-            product=MiniX.PID,
-            serial=serial_number,
-            interface=1,
-            latency=12,
-        )
-        self._serial_number = serial_number
+            self._ftdi.open_mpsse(
+                vendor=MiniX.VID,
+                product=MiniX.PID,
+                serial=serial_number,
+                interface=1,
+                latency=12,
+            )
+            self._serial_number = serial_number
+        except USBError as e:
+            self._ftdi = None
+            raise ConnectionError()
 
         # Initialize IO lines
         self._register_state.high_byte_state = 0x08
